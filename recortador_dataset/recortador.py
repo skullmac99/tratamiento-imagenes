@@ -2,20 +2,23 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 from PIL import Image, ImageTk, ImageOps
+import re
 
 FILAS = 3
 COLUMNAS = 3
 TAMANO_FINAL = (512, 512)
 
+
 class RecortadorGridApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Recortador automático de imágenes 3x3")
-        self.root.geometry("950x800")
+        self.root.geometry("980x850")
 
         self.imagen_original = None
         self.recortes = []
         self.preview_imgs = []
+        self.entries_nombres = []
 
         self.carpeta_salida = Path("imagenes_recortadas")
         self.carpeta_salida.mkdir(exist_ok=True)
@@ -25,15 +28,6 @@ class RecortadorGridApp:
             text="Recortador de dataset 3x3",
             font=("Arial", 18, "bold")
         ).pack(pady=10)
-
-        frame_nombre = tk.Frame(root)
-        frame_nombre.pack(pady=5)
-
-        tk.Label(frame_nombre, text="Nombre base:").grid(row=0, column=0, padx=5)
-
-        self.entry_nombre = tk.Entry(frame_nombre, width=30)
-        self.entry_nombre.grid(row=0, column=1, padx=5)
-        self.entry_nombre.insert(0, "manoCara")
 
         frame_botones = tk.Frame(root)
         frame_botones.pack(pady=10)
@@ -62,7 +56,7 @@ class RecortadorGridApp:
         self.lbl_carpeta = tk.Label(
             root,
             text=f"Carpeta destino: {self.carpeta_salida.resolve()}",
-            wraplength=850
+            wraplength=900
         )
         self.lbl_carpeta.pack(pady=5)
 
@@ -130,6 +124,7 @@ class RecortadorGridApp:
             widget.destroy()
 
         self.preview_imgs.clear()
+        self.entries_nombres.clear()
 
         for i, img in enumerate(self.recortes):
             preview = img.resize((160, 160), Image.LANCZOS)
@@ -137,32 +132,35 @@ class RecortadorGridApp:
             self.preview_imgs.append(img_tk)
 
             contenedor = tk.Frame(self.frame_preview)
-            contenedor.grid(row=i // 3, column=i % 3, padx=10, pady=10)
+            contenedor.grid(row=i // 3, column=i % 3, padx=12, pady=10)
 
             lbl_img = tk.Label(contenedor, image=img_tk)
             lbl_img.pack()
 
-            lbl_texto = tk.Label(
+            tk.Label(
                 contenedor,
-                text=f"Recorte {i + 1}",
-                font=("Arial", 10)
-            )
-            lbl_texto.pack()
+                text=f"Nombre imagen {i + 1}:",
+                font=("Arial", 9)
+            ).pack(pady=(5, 0))
 
-    def obtener_siguiente_numero(self, nombre_base):
-        existentes = list(self.carpeta_salida.glob(f"{nombre_base}_*.jpg"))
+            entry = tk.Entry(contenedor, width=22)
+            entry.pack()
 
-        numeros = []
-        for archivo in existentes:
-            try:
-                numero = archivo.stem.replace(f"{nombre_base}_", "")
-                numeros.append(int(numero))
-            except ValueError:
-                pass
+            # Nombre sugerido, lo puedes borrar o cambiar
+            entry.insert(0, f"imagen_{i + 1:02d}")
 
-        if numeros:
-            return max(numeros) + 1
-        return 1
+            self.entries_nombres.append(entry)
+
+    def limpiar_nombre(self, nombre):
+        nombre = nombre.strip()
+
+        # Quita extensión si la escribiste
+        nombre = nombre.replace(".jpg", "").replace(".jpeg", "").replace(".png", "")
+
+        # Reemplaza caracteres inválidos para Windows
+        nombre = re.sub(r'[\\/*?:"<>|]', "_", nombre)
+
+        return nombre
 
     def guardar_recortes(self):
         if not self.recortes:
@@ -172,22 +170,48 @@ class RecortadorGridApp:
             )
             return
 
-        nombre_base = self.entry_nombre.get().strip()
+        self.carpeta_salida.mkdir(exist_ok=True)
 
-        if not nombre_base:
+        nombres = []
+
+        for i, entry in enumerate(self.entries_nombres, start=1):
+            nombre = self.limpiar_nombre(entry.get())
+
+            if not nombre:
+                messagebox.showwarning(
+                    "Nombre vacío",
+                    f"El recorte {i} no tiene nombre."
+                )
+                return
+
+            nombres.append(nombre)
+
+        # Evita nombres repetidos dentro del mismo lote
+        if len(nombres) != len(set(nombres)):
             messagebox.showwarning(
-                "Nombre vacío",
-                "Escribe un nombre base para las imágenes."
+                "Nombres repetidos",
+                "Hay nombres repetidos. Cambia los nombres antes de guardar."
             )
             return
 
-        self.carpeta_salida.mkdir(exist_ok=True)
+        # Evita sobrescribir archivos existentes
+        archivos_existentes = []
+        for nombre in nombres:
+            ruta = self.carpeta_salida / f"{nombre}.jpg"
+            if ruta.exists():
+                archivos_existentes.append(ruta.name)
 
-        inicio = self.obtener_siguiente_numero(nombre_base)
+        if archivos_existentes:
+            messagebox.showwarning(
+                "Archivos ya existentes",
+                "Estos archivos ya existen en la carpeta destino:\n\n"
+                + "\n".join(archivos_existentes)
+                + "\n\nCambia los nombres o elige otra carpeta."
+            )
+            return
 
-        for i, recorte in enumerate(self.recortes, start=inicio):
-            nombre = f"{nombre_base}_{i:03d}.jpg"
-            ruta_salida = self.carpeta_salida / nombre
+        for nombre, recorte in zip(nombres, self.recortes):
+            ruta_salida = self.carpeta_salida / f"{nombre}.jpg"
 
             recorte.save(
                 ruta_salida,
@@ -198,9 +222,8 @@ class RecortadorGridApp:
 
         messagebox.showinfo(
             "Guardado exitoso",
-            f"Se guardaron {len(self.recortes)} imágenes como:\n"
-            f"{nombre_base}_{inicio:03d}.jpg a {nombre_base}_{inicio + len(self.recortes) - 1:03d}.jpg\n\n"
-            f"Carpeta:\n{self.carpeta_salida.resolve()}"
+            f"Se guardaron {len(self.recortes)} imágenes en:\n\n"
+            f"{self.carpeta_salida.resolve()}"
         )
 
 
